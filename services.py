@@ -1,16 +1,21 @@
 import pygame
 
+
 font = 'files/DS Stamper.ttf'
 
-ALL_POSITIONS = {
-    'h_x': 0,
-    'h_y': 350,
-    'e_x': 1500,
-    'e_y': 380,
-    'z_x': 1500,
-    'z_y': 310,
-    'g_x': 1500,
-    'g_y': 290,
+GODZILLA_BULLETS = {
+    'files/bullets/godz_bull.png',
+    'files/bullets/godz_bull_30.png',
+    'files/bullets/godz_bull_60.png',
+    'files/bullets/godz_bull_90.png',
+    'files/bullets/godz_bull_120.png',
+    'files/bullets/godz_bull_150.png',
+    'files/bullets/godz_bull_180.png',
+    'files/bullets/godz_bull_210.png',
+    'files/bullets/godz_bull_240.png',
+    'files/bullets/godz_bull_270.png',
+    'files/bullets/godz_bull_300.png',
+    'files/bullets/godz_bull_330.png',
 }
 
 
@@ -42,3 +47,9 @@ def update_sprite(*args):
 def draw_and_update(*args, screen):
     draw_sprite(*args, screen=screen)
     update_sprite(*args)
+
+
+def hero_img(block_left_img):
+    end = pygame.time.get_ticks() - 200
+    if end >= block_left_img:
+        return True
