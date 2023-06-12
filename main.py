@@ -3,43 +3,30 @@ from random import choice, randint
 import pygame
 from pygame.sprite import Sprite, Group, GroupSingle, spritecollide, groupcollide
 
-from services import image_load, font_render, draw_and_update, hero_img, GODZILLA_BULLETS
+import services
+from services import image_load, font_render, draw_and_update, hero_img, GODZILLA_BULLETS, screen, layer
 
-WIDTH = 1200
-HEIGHT = 650
-FPS = 60
-
-BLACK = (0, 0, 0)
-RED = (255, 0, 0)
-BARD = (200, 0, 0)
-FIOL = (162, 0, 255)
 
 game_start = True
 game_active = False
+is_line = False
+is_jump = False
+is_kit = False
 
 block_left_img = 0
 score = 0
 
 pygame.init()
-pygame.mixer.init()
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.flip()
 pygame.display.set_caption('PlatMad')
-icon = image_load('files/characters/zombie.png')
+icon = image_load('files/static/background.png')
 pygame.display.set_icon(icon)
 clock = pygame.time.Clock()
 
-text_surface = font_render('PLATMAD', 50, True, BARD)
-gave_over_surface = font_render('GAME OVER', 70, True, RED)
-start_text_surface = font_render('PRESS SPACE TO START', 60, True, 'YELLOW')
-bullets_surface = image_load('files/bullets/bullets.png')
-health_surface = image_load('files/health.png')
-
-background_surface = image_load('files/background.png').convert()
-
-key = pygame.key.get_pressed()
+services.game_start_music.play(-1)
 
 
+# Sprites
 class Hero(Sprite):
     def __init__(self):
         super().__init__()
@@ -48,40 +35,95 @@ class Hero(Sprite):
         self.image_right_walk = image_load('files/characters/hero_right_walk.png')
         self.image_left_walk = image_load('files/characters/hero_left_walk.png')
         self.image_line = image_load('files/characters/hero_line.png')
-        self.images = [self.image_right, self.image_right_walk]
-        self.index = 0
-        self.image = self.images[self.index]
+        self.image_line_left = image_load('files/characters/hero_line_left.png')
+        self.image = self.image_right
         self.rect = self.image.get_rect(midbottom=(170, 465), width=40)
+        self.rect_line = self.image_line.get_rect()
         self.gravity = 0
         self.health = 10
         self.bullets = 10
+        self.step = 0
+        self.line_time = 0
+        self.center = self.rect.center
 
     def hero_moves(self):
-        if key[pygame.K_w] and self.rect.bottom == 465:
+        key = pygame.key.get_pressed()
+        if key[pygame.K_w] and self.rect.bottom == 465 and self.image != self.image_line \
+                and self.image != self.image_line_left:
+            global is_jump
+            if not is_jump:
+                services.jump_music.play()
+            if self.image == self.image_line or self.image == self.image_right_walk:
+                self.image = self.image_right
+            elif self.image == self.image_line_left or self.image == self.image_left_walk:
+                self.image = self.image_left
             self.gravity = -15
         if key[pygame.K_d] and self.rect.x < 1000:
-            self.images = [self.image_right, self.image_right_walk]
+            if self.image != self.image_line:
+                if self.rect.bottom < 465:
+                    self.image = self.image_right
+                else:
+                    self.image = self.image_right if self.step >= 0.5 else self.image_right_walk
+                    self.step += 0.1
+                    if self.step > 1:
+                        self.step = 0
             self.rect.x += 2
-        if key[pygame.K_a] and self.rect.x > 100 and hero_img(block_left_img):
-            self.images = [self.image_left, self.image_left_walk]
+        if key[pygame.K_a] and self.rect.x > 100:
+            if hero_img(block_left_img):
+                if self.image != self.image_line_left:
+                    if self.rect.bottom < 465:
+                        self.image = self.image_left
+                    else:
+                        self.image = self.image_left if self.step >= 0.5 else self.image_left_walk
+                        self.step += 0.1
+                        if self.step > 1:
+                            self.step = 0
             self.rect.x -= 2
+        if key[pygame.K_s]:
+            if hero_img(block_left_img):
+                self.rect.height = 50
+                if self.image == self.image_right or self.image == self.image_right_walk:
+                    self.image = self.image_line
+                elif self.image == self.image_left or self.image == self.image_left_walk:
+                    self.image = self.image_line_left
+            global is_line
+            if not is_line:
+                services.line_music.play()
+                is_line = True
+            hero.sprite.line_time = 10
 
-    def animation(self):
-        self.index += 0.1
-        if self.index > 1:
-            self.index = 0
-        self.image = self.images[int(self.index)]
+    def destroy(self):
+        if self.health <= 0:
+            services.game_over_music.play(0)
+            global game_active
+            game_active = False
+
+    def apply_line(self):
+        global is_line
+        if self.line_time > 0:
+            self.line_time -= 1
+            if self.line_time == 0:
+                is_line = False
+                self.rect.height = 101
+                if self.image == self.image_line:
+                    self.image = self.image_right
+                elif self.image == self.image_line_left:
+                    self.image = self.image_left
 
     def apply_gravity(self):
         self.gravity += 0.9
         self.rect.y += self.gravity
+        if self.gravity == 0:
+            global is_jump
+            is_jump = False
         if self.rect.bottom >= 465:
             self.rect.bottom = 465
 
     def update(self):
         self.hero_moves()
-        self.animation()
+        self.apply_line()
         self.apply_gravity()
+        self.destroy()
 
 
 class Enemy(Sprite):
@@ -108,9 +150,12 @@ class Enemy(Sprite):
             self.gravity = 0
 
     def shoot(self):
-        if not randint(0, 300) and self.rect.x < WIDTH:
+        if not randint(0, 300) and self.rect.x < services.WIDTH:
             if self.kind == 'godzilla':
-                self.rect.centery = randint(self.rect.top, self.rect.bottom)
+                self.rect.centery = randint(self.rect.top, self.rect.bottom - 10)
+                services.godzilla_shoot_music.play()
+            if self.kind == 'evil':
+                services.evil_shoot_music.play()
             bullet = BulletEnemy(self.rect.x, self.rect.centery, self.kind)
             bullets_enemy.add(bullet)
 
@@ -120,6 +165,7 @@ class Enemy(Sprite):
 
     def destroy(self):
         if self.health <= 0:
+            services.kill_music.play()
             self.kill()
             hero.sprite.bullets += 3
 
@@ -142,7 +188,6 @@ class BulletHero(Sprite):
     def __init__(self, x, y):
         super().__init__()
         self.image_start = image_load('files/bullets/hero_bull.png')
-        self.image_post = image_load('files/bullets/h_bull_bang.png')
         self.image = self.image_start
         self.rect = self.image.get_rect(x=x, y=y)
         self.damage = 1
@@ -159,6 +204,7 @@ class BulletHero(Sprite):
 class BulletEnemy(Sprite):
     def __init__(self, x, y, kind):
         super().__init__()
+        self.kind = kind
         if kind == 'evil':
             self.image = image_load('files/bullets/evil_bull.png')
             self.rect = self.image.get_rect(x=x, y=y)
@@ -210,21 +256,40 @@ bullets_enemy = Group()
 
 
 # Functions
+def get_layer_surface():
+    global score
+    if 0 < score < 200:
+        return layer(1)
+    if 5000 <= score < 5200:
+        return layer(2)
+    if 10000 <= score < 10200:
+        return layer(3)
+
+
 def score_logic():
     if score < 5000:
         if not randint(0, 300):
             enemies.add(Enemy(c))
+            if c == 'zombie':
+                services.zombie_music.play()
+            if c == 'godzilla':
+                services.godzilla_music.play()
+            if c == 'evil':
+                services.evil_music.play()
         if score % 1000 == 0:
+            services.recharge_music.play()
             hero.sprite.bullets += 1
     if 5000 <= score < 10000:
         if not randint(0, 200):
             enemies.add(Enemy(c))
         if score % 500 == 0:
+            services.recharge_music.play()
             hero.sprite.bullets += 1
     if score >= 10000:
         if not randint(0, 100):
             enemies.add(Enemy(c))
         if score % 250 == 0:
+            services.recharge_music.play()
             hero.sprite.bullets += 1
 
 
@@ -244,6 +309,7 @@ def trophies_draw():
 
 while True:
     for event in pygame.event.get():
+
         if (event.type == pygame.QUIT
                 or event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
             pygame.quit()
@@ -252,66 +318,82 @@ while True:
             if (
                 event.type == pygame.MOUSEBUTTONDOWN
                 and event.button == 1
-                and hero.sprite.bullets > 0
             ):
+                if hero.sprite.bullets <= 0:
+                    services.no_bullets_music.play()
+                else:
+                    services.shoot_music.play()
 
-                block_left_img = pygame.time.get_ticks()
+                    block_left_img = pygame.time.get_ticks()
 
-                hero.sprite.image = hero.sprite.image_right
-                new_bullet_hero = BulletHero(hero.sprite.rect.x + hero.sprite.rect.width + 52,
-                                             hero.sprite.rect.centery - 10)
-                bullets_hero.add(new_bullet_hero)
-                hero.sprite.bullets -= 1
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_s:
-                    hero.sprite.image = hero.sprite.image_line
+                    hero.sprite.rect.height = 101
+                    hero.sprite.image = hero.sprite.image_right
+                    new_bullet_hero = BulletHero(hero.sprite.rect.x + hero.sprite.rect.width + 52,
+                                                 hero.sprite.rect.centery - 10)
+                    bullets_hero.add(new_bullet_hero)
+                    hero.sprite.bullets -= 1
 
     keys = pygame.key.get_pressed()
 
-    screen.blit(background_surface, (0, 0))
+    screen.blit(services.background_surface, (0, 0))
 
     if game_start:
-        screen.blit(text_surface, (420, 30))
-        screen.blit(start_text_surface, (265, 160))
+        screen.blit(services.text_surface, (420, 30))
+        screen.blit(services.start_text_surface, (265, 160))
 
         if keys[pygame.K_SPACE]:
             game_start = False
             game_active = True
+            services.game_start_music.stop()
+            services.game_active_music.play(-1)
 
     elif game_active:
         score += 1
         c = choice(['evil', 'zombie', 'godzilla'])
         score_logic()
-        draw_and_update(hero, enemies, bullets_hero, bullets_enemy, screen=screen)
+        if get_layer_surface():
+            screen.blit(get_layer_surface(), (400, 100))
+        draw_and_update(hero, enemies, bullets_hero, bullets_enemy)
+
+        if score % 5000 == 0:
+            is_kit = False
+            x_pos = randint(500, 800)
+        if score > 5000:
+            if not is_kit:
+                screen.blit(services.kit_surface, (x_pos, 418))
+            if x_pos - 50 < hero.sprite.rect.x < x_pos + 10 and 425 < hero.sprite.rect.bottom <= 475 and not is_kit:
+                is_kit = True
+                hero.sprite.health += 1
 
         if spritecollide(hero.sprite, enemies, False):
-            game_active = False
+            hero.sprite.health = 0
 
         for enemy in groupcollide(enemies, bullets_hero, False, True).keys():
             enemy.health -= new_bullet_hero.damage
 
-        for i in spritecollide(hero.sprite, bullets_enemy, True):
-            hero.sprite.health -= i.damage
-            if hero.sprite.health <= 0:
-                game_active = False
+        for enemy_bullet in spritecollide(hero.sprite, bullets_enemy, True):
+            hero.sprite.health -= enemy_bullet.damage
 
-        bullets_count_surface = font_render(str(hero.sprite.bullets), 50, True, BLACK)
-        health_count = font_render(str(hero.sprite.health), 50, True, RED)
-        score_surface = font_render(f'SCORE: {str(score // 10)}', 60, True, FIOL)
+        bullets_count_surface = font_render(str(hero.sprite.bullets), 50, True, services.BLACK)
+        health_count = font_render(str(hero.sprite.health), 50, True, services.RED)
+        score_surface = font_render(f'SCORE: {str(score // 10)}', 60, True, services.VIOLET)
 
         screen.blit(bullets_count_surface, (50, 30))
-        screen.blit(bullets_surface, (95, 40))
+        screen.blit(services.bullets_surface, (95, 40))
         screen.blit(health_count, (160, 30))
-        screen.blit(health_surface, (210, 42))
+        screen.blit(services.health_surface, (210, 42))
         screen.blit(score_surface, (400, 20))
     else:
-
+        services.game_active_music.stop()
+        services.godzilla_music.stop()
+        services.zombie_music.stop()
+        services.recharge_music.stop()
         if trophies_draw():
             screen.blit(trophies_draw(), (480, 310))
-        screen.blit(text_surface, (420, 30))
-        screen.blit(gave_over_surface, (365, 100))
+        screen.blit(services.text_surface, (420, 30))
+        screen.blit(services.gave_over_surface, (365, 100))
         screen.blit(score_surface, (400, 210))
-        screen.blit(start_text_surface, (265, 500))
+        screen.blit(services.start_text_surface, (265, 500))
         enemies.empty()
         bullets_hero.empty()
         bullets_enemy.empty()
@@ -321,6 +403,8 @@ while True:
             hero.add(Hero())
             score = 0
             game_active = True
+            services.game_over_music.stop()
+            services.game_active_music.play(-1)
 
     pygame.display.update()
-    clock.tick(FPS)
+    clock.tick(services.FPS)
